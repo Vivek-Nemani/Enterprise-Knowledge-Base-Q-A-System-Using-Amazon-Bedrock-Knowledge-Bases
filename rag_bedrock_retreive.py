@@ -29,7 +29,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("Simple Bedrock Knowledge Base Chat")
+st.title("Bedrock Knowledge Base Chat")
 st.markdown('<p class="subtitle">Ask a question to your Amazon Bedrock Knowledge Base.</p>', unsafe_allow_html=True)
 
 aws_region = os.getenv("AWS_REGION", "eu-north-1")
