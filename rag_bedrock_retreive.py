@@ -40,9 +40,20 @@ st.markdown(
 
 MAX_LOCAL_CONTEXT_CHARS = 120_000
 
-aws_region = os.getenv("AWS_REGION", "ap-south-1")
-knowledge_base_id = os.getenv("KNOWLEDGE_BASE_ID", "DDSGHZ5O1L")
-gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("gemini_key")
+def _get_secret(key: str, default: str = "") -> str:
+    try:
+        if key in st.secrets:
+            value = st.secrets[key]
+            if value:
+                return str(value)
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+
+aws_region = _get_secret("AWS_REGION", "ap-south-1")
+knowledge_base_id = _get_secret("KNOWLEDGE_BASE_ID", "DDSGHZ5O1L")
+gemini_api_key = _get_secret("GEMINI_API_KEY") or _get_secret("gemini_key")
 if gemini_api_key:
     os.environ["GEMINI_API_KEY"] = gemini_api_key
 
