@@ -32,7 +32,7 @@ st.markdown(
 st.title("Bedrock Knowledge Base Chat")
 st.markdown('<p class="subtitle">Ask a question to your Amazon Bedrock Knowledge Base.</p>', unsafe_allow_html=True)
 
-aws_region = os.getenv("AWS_REGION", "eu-north-1")
+aws_region = os.getenv("AWS_REGION", "ap-south-1")
 knowledge_base_id = os.getenv("KNOWLEDGE_BASE_ID", "DDSGHZ5O1L")
 gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("gemini_key")
 if gemini_api_key:
