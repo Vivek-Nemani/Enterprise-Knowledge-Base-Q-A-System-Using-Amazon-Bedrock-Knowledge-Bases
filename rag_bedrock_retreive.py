@@ -1,9 +1,12 @@
+import io
 import os
 import boto3
 import streamlit as st
 from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
 from google import genai
+from pypdf import PdfReader
+
 
 load_dotenv()
 
@@ -30,13 +33,36 @@ st.markdown(
 )
 
 st.title("Bedrock Knowledge Base Chat")
-st.markdown('<p class="subtitle">Ask a question to your Amazon Bedrock Knowledge Base.</p>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="subtitle">Use your Bedrock Knowledge Base, or upload a local document when AWS is unavailable.</p>',
+    unsafe_allow_html=True,
+)
+
+MAX_LOCAL_CONTEXT_CHARS = 120_000
 
 aws_region = os.getenv("AWS_REGION", "ap-south-1")
 knowledge_base_id = os.getenv("KNOWLEDGE_BASE_ID", "DDSGHZ5O1L")
 gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("gemini_key")
 if gemini_api_key:
     os.environ["GEMINI_API_KEY"] = gemini_api_key
+
+
+def extract_text_from_upload(uploaded_file) -> str:
+    name = (uploaded_file.name or "").lower()
+    data = uploaded_file.getvalue()
+    if name.endswith(".pdf"):
+        reader = PdfReader(io.BytesIO(data))
+        parts = []
+        for page in reader.pages:
+            parts.append(page.extract_text() or "")
+        return "\n\n".join(parts).strip()
+    return data.decode("utf-8", errors="replace").strip()
+
+
+def truncate_for_context(text: str):
+    if len(text) <= MAX_LOCAL_CONTEXT_CHARS:
+        return (text, False)
+    return (text[:MAX_LOCAL_CONTEXT_CHARS], True)
 
 
 def retrieve_context(question_text: str) -> str:
@@ -60,7 +86,7 @@ def generate_answer(question_text: str, context_text: str) -> str:
 You are a helpful assistant.
 Answer the user's question using only the context below.
 If the answer is not found in the context, say:
-"I could not find that in the knowledge base context."
+"I could not find that in the document context."
 
 Context:
 {context_text}
@@ -73,31 +99,73 @@ Question:
     return response.text or "No answer was generated."
 
 
+context_source = st.radio(
+    "Context source",
+    ["Amazon Bedrock Knowledge Base", "Local document"],
+    horizontal=True,
+    help="Choose Local document when AWS/Bedrock is unavailable; answers still use Gemini with your file as context.",
+)
+
+extracted_local = ""
+uploaded_file = None
+if context_source == "Local document":
+    uploaded_file = st.file_uploader(
+        "Upload a document (PDF, TXT, or Markdown)",
+        type=["pdf", "txt", "md"],
+        help="Text is sent to Gemini as context (large files are truncated).",
+    )
+    if uploaded_file is not None:
+        try:
+            extracted_local = extract_text_from_upload(uploaded_file)
+        except Exception as exc:
+            st.error(f"Could not read the file: {exc}")
+    if uploaded_file is not None and not extracted_local.strip():
+        st.warning("No text could be extracted from this file. Try another PDF or a .txt/.md file.")
+
 question = st.text_input("Enter your question", placeholder="Type your question here...")
 
 if st.button("Ask", type="primary"):
-    if not knowledge_base_id:
-        st.error("Set `KNOWLEDGE_BASE_ID` in your environment variables.")
-    elif not gemini_api_key:
+    if not gemini_api_key:
         st.error("Set `GEMINI_API_KEY` (or `gemini_key`) in your environment variables.")
     elif not question.strip():
         st.error("Please enter a question.")
-    else:
-        try:
-            with st.spinner("Retrieving knowledge base context..."):
-                context = retrieve_context(question)
-
-            if not context.strip():
-                st.warning("No context returned from Bedrock Knowledge Base.")
-            else:
+    elif context_source == "Local document":
+        if not extracted_local.strip():
+            st.error("Upload a document with readable text first.")
+        else:
+            try:
+                context, was_truncated = truncate_for_context(extracted_local)
+                if was_truncated:
+                    st.caption(
+                        f"Using the first {MAX_LOCAL_CONTEXT_CHARS:,} characters of the document for context."
+                    )
                 with st.spinner("Generating answer with Gemini..."):
                     answer = generate_answer(question, context)
                 st.subheader("Answer")
                 st.write(answer)
+                with st.expander("Context sent to the model"):
+                    st.write(context)
+            except Exception as exc:
+                st.error(f"Something went wrong: {exc}")
+    else:
+        if not knowledge_base_id:
+            st.error("Set `KNOWLEDGE_BASE_ID` in your environment variables.")
+        else:
+            try:
+                with st.spinner("Retrieving knowledge base context..."):
+                    context = retrieve_context(question)
 
-            with st.expander("Retrieved Context"):
-                st.write(context if context else "No context returned.")
-        except (ClientError, BotoCoreError) as exc:
-            st.error(f"AWS Bedrock error: {exc}")
-        except Exception as exc:  # Broad catch for API and runtime issues.
-            st.error(f"Something went wrong: {exc}")
+                if not context.strip():
+                    st.warning("No context returned from Bedrock Knowledge Base.")
+                else:
+                    with st.spinner("Generating answer with Gemini..."):
+                        answer = generate_answer(question, context)
+                    st.subheader("Answer")
+                    st.write(answer)
+
+                with st.expander("Retrieved Context"):
+                    st.write(context if context else "No context returned.")
+            except (ClientError, BotoCoreError) as exc:
+                st.error(f"AWS Bedrock error: {exc}")
+            except Exception as exc:  # Broad catch for API and runtime issues.
+                st.error(f"Something went wrong: {exc}")
