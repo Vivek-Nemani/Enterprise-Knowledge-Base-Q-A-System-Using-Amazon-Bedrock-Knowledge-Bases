@@ -149,6 +149,3 @@ See `requirements.txt`:
 
 Built during my internship at **Innomatics Research Labs**.
 
-## License
-
-For learning and demonstration purposes. Use at your own discretion.
